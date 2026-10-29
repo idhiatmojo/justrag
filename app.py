@@ -6,8 +6,10 @@ from pathlib import Path
 from src.config import ALLOWED_SUBJECTS, RAW_PDF_DIR
 import importlib
 import src.storage.vector_store
+import src.storage.bm25_store
 import src.llm_factory
 importlib.reload(src.storage.vector_store)
+importlib.reload(src.storage.bm25_store)
 importlib.reload(src.llm_factory)
 from src.llm_factory import get_llm_client
 from src.storage.vector_store import ChromaVectorStore
@@ -373,7 +375,10 @@ for sk, sinfo in ALLOWED_SUBJECTS.items():
     st.sidebar.text(f"• {sk.upper()}: {stats.get(sk, 0)} chunks")
 
 # BM25 Lexical Stats
-bm25_stats = bm25_store.get_stats_by_subject()
+if hasattr(bm25_store, "get_stats_by_subject"):
+    bm25_stats = bm25_store.get_stats_by_subject()
+else:
+    bm25_stats = {sub: len(chunks) for sub, chunks in getattr(bm25_store, "chunk_stores", {}).items()}
 bm25_curr = bm25_stats.get(selected_subject, 0)
 st.sidebar.caption(f"🗂️ Indeks Leksikal BM25 ({selected_subject.upper()}): {bm25_curr} chunks")
 
@@ -603,7 +608,10 @@ with tab3:
     if col_rows:
         st.dataframe(pd.DataFrame(col_rows), use_container_width=True)
 
-    bm25_all = bm25_store.get_stats_by_subject()
+    if hasattr(bm25_store, "get_stats_by_subject"):
+        bm25_all = bm25_store.get_stats_by_subject()
+    else:
+        bm25_all = {sub: len(chunks) for sub, chunks in getattr(bm25_store, "chunk_stores", {}).items()}
     if bm25_all:
         bm25_str = " | ".join([f"{k.upper()}: {v} chunks" for k, v in bm25_all.items()])
         st.info(f"📚 **Indeks Leksikal BM25 (Offline Terpadu):** {bm25_str}")
