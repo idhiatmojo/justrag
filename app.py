@@ -343,11 +343,12 @@ if uploaded_files:
             target_dir.mkdir(parents=True, exist_ok=True)
             
             for uf in uploaded_files:
-                save_path = target_dir / uf.name
+                clean_name = Path(uf.name).name
+                save_path = target_dir / clean_name
                 with open(save_path, "wb") as f:
                     f.write(uf.getbuffer())
                 
-                st.write(f"Indexing `{uf.name}`...")
+                st.write(f"Indexing `{clean_name}`...")
                 try:
                     res = ingestion_pipeline.ingest_single_pdf(
                         pdf_path=save_path,
@@ -356,7 +357,7 @@ if uploaded_files:
                     )
                     st.write(f"✅ Selesai: {res['pages']} hal, {res['chunks']} chunks.")
                 except Exception as e:
-                    st.error(f"❌ Gagal memproses `{uf.name}`: {e}")
+                    st.error(f"❌ Gagal memproses `{clean_name}`: {e}")
             status.update(label="Proses indeks selesai!", state="complete")
 
 # Stats per subject & active collection info
