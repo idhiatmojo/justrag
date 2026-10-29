@@ -52,4 +52,11 @@ DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 100
 TOP_K_RETRIEVAL = 4
+
+# Authentication Settings
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+APP_ADMIN_USER = os.getenv("APP_ADMIN_USER", "admin")
+APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD", "admin123")
+APP_GURU_USER = os.getenv("APP_GURU_USER", "guru")
+APP_GURU_PASSWORD = os.getenv("APP_GURU_PASSWORD", "guru123")
 RRF_K = 60 # Reciprocal Rank Fusion constant

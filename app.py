@@ -8,9 +8,12 @@ import importlib
 import src.storage.vector_store
 import src.storage.bm25_store
 import src.llm_factory
+import src.auth
 importlib.reload(src.storage.vector_store)
 importlib.reload(src.storage.bm25_store)
 importlib.reload(src.llm_factory)
+importlib.reload(src.auth)
+from src.auth import require_authentication, render_user_profile_sidebar
 from src.llm_factory import get_llm_client
 from src.storage.vector_store import ChromaVectorStore
 from src.storage.bm25_store import BM25SubjectStore
@@ -35,6 +38,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Authentication Gate
+if not require_authentication():
+    st.stop()
+
 # Initialize Session State
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -44,6 +51,9 @@ if "eval_results" not in st.session_state:
 # ----------------- SIDEBAR CONFIGURATION -----------------
 st.sidebar.title("🎓 Konfigurasi Sistem RAG")
 st.sidebar.caption("Prototipe Penelitian S2: Generatif Bahan Ajar & Asesmen Terisolasi Domain")
+
+# User Profile & Logout Section
+render_user_profile_sidebar()
 
 # 1. Subject Selection
 st.sidebar.subheader("1. Pilih Mata Pelajaran (Kelas X)")
@@ -607,7 +617,7 @@ with tab3:
             "Rincian Mapel": sub_str or "(kosong)"
         })
     if col_rows:
-        st.dataframe(pd.DataFrame(col_rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(col_rows), width="stretch")
 
     if hasattr(bm25_store, "get_stats_by_subject"):
         bm25_all = bm25_store.get_stats_by_subject()
