@@ -1,0 +1,5 @@
+config,latency_sec,hit_rate@4,mrr,context_precision,context_recall,faithfulness,answer_relevance,bloom_compliance
+"1. Baseline (Naive Dense, No Filter)",9.6273,1.0,1.0,0.5,0.9333,0.287,0.38,0.5208
+2. Naive + Mapel Filter,11.65,1.0,1.0,0.5,0.9333,0.2348,0.3687,0.5208
+3. Hybrid (Dense+BM25) + Filter,9.2133,1.0,1.0,0.5,0.9333,0.2813,0.2967,0.5208
+4. Proposed (Hybrid+Filter+Reranker),13.5273,1.0,1.0,0.5,0.9333,0.2276,0.4103,0.5208
