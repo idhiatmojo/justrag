@@ -206,18 +206,40 @@ class CustomOpenAICompatibleClient(BaseLLMClient):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.3,
+        max_retries: int = 3,
     ) -> str:
         messages: List[Dict[str, Any]] = []
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=3000,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+                # Check for retryable gateway/network/rate-limit errors: 504, 502, 503, 429, timeout
+                is_retryable = any(
+                    code in err_str for code in ["504", "502", "503", "429", "timeout", "Timeout", "ConnectionError"]
+                )
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = 3.0 * (attempt + 1)
+                    print(f"[CustomOpenAICompatibleClient] Terjadi kendala gateway ({err_str[:80]}). Mencoba kembali dalam {wait_time:.1f} detik (Percobaan {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    break
+
+        if last_error:
+            raise last_error
+        return ""
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Delegate embedding to the configured fallback provider."""
@@ -277,18 +299,40 @@ class GrokLLMClient(BaseLLMClient):
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.3,
+        max_retries: int = 3,
     ) -> str:
         messages: List[Dict[str, Any]] = []
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=3000,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                err_str = str(e)
+                last_error = e
+                # Check for retryable gateway/network/rate-limit errors: 504, 502, 503, 429, timeout
+                is_retryable = any(
+                    code in err_str for code in ["504", "502", "503", "429", "timeout", "Timeout", "ConnectionError"]
+                )
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = 3.0 * (attempt + 1)
+                    print(f"[CustomOpenAICompatibleClient] Terjadi kendala gateway ({err_str[:80]}). Mencoba kembali dalam {wait_time:.1f} detik (Percobaan {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    break
+
+        if last_error:
+            raise last_error
+        return ""
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Delegate embedding to the configured fallback provider."""

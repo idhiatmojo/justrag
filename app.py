@@ -4,10 +4,12 @@ import pandas as pd
 from pathlib import Path
 
 from src.config import ALLOWED_SUBJECTS, RAW_PDF_DIR
-from src.llm_factory import get_llm_client
 import importlib
 import src.storage.vector_store
+import src.llm_factory
 importlib.reload(src.storage.vector_store)
+importlib.reload(src.llm_factory)
+from src.llm_factory import get_llm_client
 from src.storage.vector_store import ChromaVectorStore
 from src.storage.bm25_store import BM25SubjectStore
 from src.ingestion.pipeline import DynamicIngestionPipeline
@@ -418,17 +420,26 @@ with tab1:
                     final_chunks = raw_chunks[:4]
 
                 # 3. Generate
-                output = generator.generate(
-                    query=user_query,
-                    subject=selected_subject,
-                    retrieved_chunks=final_chunks,
-                    task_type=task_mode,
-                    temperature=temperature
-                )
-
-                # Display Output
-                st.subheader("📋 Hasil Generasi Pedagogis:")
-                st.markdown(output["response"])
+                try:
+                    output = generator.generate(
+                        query=user_query,
+                        subject=selected_subject,
+                        retrieved_chunks=final_chunks,
+                        task_type=task_mode,
+                        temperature=temperature
+                    )
+                    # Display Output
+                    st.subheader("📋 Hasil Generasi Pedagogis:")
+                    st.markdown(output["response"])
+                except Exception as e:
+                    st.error(f"❌ Terjadi kendala dari provider LLM: {e}")
+                    st.info(
+                        "💡 **Solusi Gateway Timeout (504) / Gangguan Server:**\n"
+                        "- Router gateway publik (`ai.tamandata.com`) sempat melebihi batas waktu respon.\n"
+                        "- Silakan klik kembali tombol **✨ Hasilkan Konten dengan RAG** (otomatis melakukan retry).\n"
+                        "- Atau ganti ke model yang lebih cepat/stabil di dropdown sidebar, misalnya **`tamandata`**, **`cx/gpt-5.6-sol`**, atau **`solar-pro4`**."
+                    )
+                    output = None
 
                 # Display Citations / Grounding
                 st.divider()
