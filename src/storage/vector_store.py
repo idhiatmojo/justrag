@@ -18,9 +18,30 @@ class ChromaVectorStore:
             metadata={"hnsw:space": "cosine"}
         )
 
+    def _get_collection(self, dim: int):
+        """Dynamically routes to the collection matching the embedding dimension.
+        - 3072: Gemini ('curriculum_rag_docs')
+        - 384:  Local Fallback / all-MiniLM ('curriculum_rag_docs_local_384')
+        - 1536: OpenAI ('curriculum_rag_docs_openai_1536')
+        """
+        if dim == 3072:
+            col_name = "curriculum_rag_docs"
+        elif dim == 384:
+            col_name = "curriculum_rag_docs_local_384"
+        elif dim == 1536:
+            col_name = "curriculum_rag_docs_openai_1536"
+        else:
+            col_name = f"curriculum_rag_docs_dim_{dim}"
+
+        return self.client.get_or_create_collection(
+            name=col_name,
+            metadata={"hnsw:space": "cosine"}
+        )
+
     def upsert_chunks(self, chunks: List[Dict[str, Any]], embedder: BaseLLMClient):
         """
         Embeds and upserts chunks into ChromaDB with metadata.
+        Auto-routes to the dimension-matched collection.
         """
         if not chunks:
             return 0
@@ -39,8 +60,13 @@ class ChromaVectorStore:
 
         # Generate embeddings — batching and rate-limit retry are handled inside embed_texts()
         all_embeddings = embedder.embed_texts(documents)
+        if not all_embeddings:
+            return 0
 
-        self.collection.upsert(
+        dim = len(all_embeddings[0])
+        target_collection = self._get_collection(dim)
+
+        target_collection.upsert(
             ids=ids,
             documents=documents,
             embeddings=all_embeddings,
@@ -57,14 +83,17 @@ class ChromaVectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Queries the vector store. If subject is provided, applies metadata filtering.
+        Auto-routes query to the collection corresponding to the embedder's dimension.
         """
         query_emb = embedder.embed_texts([query])[0]
+        dim = len(query_emb)
+        target_collection = self._get_collection(dim)
         
         where_filter = None
         if subject and subject.strip():
             where_filter = {"subject": subject.lower().strip()}
 
-        results = self.collection.query(
+        results = target_collection.query(
             query_embeddings=[query_emb],
             n_results=top_k,
             where=where_filter,
@@ -91,10 +120,17 @@ class ChromaVectorStore:
 
         return formatted_results
 
-    def get_stats_by_subject(self) -> Dict[str, int]:
-        """Returns document counts per subject."""
+    def get_stats_by_subject(self, embedder: Optional[BaseLLMClient] = None) -> Dict[str, int]:
+        """Returns document counts per subject for the active embedder collection."""
         try:
-            data = self.collection.get(include=["metadatas"])
+            if embedder is not None:
+                sample = embedder.embed_texts(["probe"])
+                dim = len(sample[0]) if sample else 3072
+                collection = self._get_collection(dim)
+            else:
+                collection = self.collection
+
+            data = collection.get(include=["metadatas"])
             counts = {}
             if data and "metadatas" in data and data["metadatas"]:
                 for m in data["metadatas"]:
@@ -105,5 +141,10 @@ class ChromaVectorStore:
             return {}
 
     def clear_subject(self, subject: str):
-        """Removes all chunks belonging to a specific subject."""
-        self.collection.delete(where={"subject": subject.lower().strip()})
+        """Removes all chunks belonging to a specific subject across all dimension collections."""
+        sub_filter = {"subject": subject.lower().strip()}
+        for col in self.client.list_collections():
+            try:
+                col.delete(where=sub_filter)
+            except Exception:
+                pass

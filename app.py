@@ -315,16 +315,19 @@ if uploaded_files:
                     f.write(uf.getbuffer())
                 
                 st.write(f"Indexing `{uf.name}`...")
-                res = ingestion_pipeline.ingest_single_pdf(
-                    pdf_path=save_path,
-                    subject=selected_subject,
-                    embedder=llm_client
-                )
-                st.write(f"✅ Selesai: {res['pages']} hal, {res['chunks']} chunks.")
-            status.update(label="Semua PDF berhasil diindeks!", state="complete")
+                try:
+                    res = ingestion_pipeline.ingest_single_pdf(
+                        pdf_path=save_path,
+                        subject=selected_subject,
+                        embedder=llm_client
+                    )
+                    st.write(f"✅ Selesai: {res['pages']} hal, {res['chunks']} chunks.")
+                except Exception as e:
+                    st.error(f"❌ Gagal memproses `{uf.name}`: {e}")
+            status.update(label="Proses indeks selesai!", state="complete")
 
 # Stats per subject
-stats = vector_store.get_stats_by_subject()
+stats = vector_store.get_stats_by_subject(embedder=llm_client)
 st.sidebar.caption(f"📊 Status Korpus Tersimpan:")
 for sk, sinfo in ALLOWED_SUBJECTS.items():
     st.sidebar.text(f"• {sk.upper()}: {stats.get(sk, 0)} chunks")
