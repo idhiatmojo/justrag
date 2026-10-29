@@ -13,6 +13,13 @@ from src.retrieval.reranker import LexicalSemanticReranker
 from src.generation.generator import PedagogicalGenerator
 from src.evaluation.evaluator import SystematicRAGEvaluator
 from src.evaluation.synthetic_data import EvaluationDatasetManager
+from src.custom_providers import (
+    load_custom_presets,
+    save_custom_preset,
+    delete_custom_preset,
+    fetch_available_models,
+    test_custom_endpoint,
+)
 
 st.set_page_config(
     page_title="RAG Generatif Mapel Fase E - S2 Project",
@@ -48,10 +55,14 @@ st.sidebar.info(ALLOWED_SUBJECTS[selected_subject]["description"])
 st.sidebar.subheader("2. Pilihan Model LLM")
 provider = st.sidebar.selectbox(
     "LLM Provider:",
-    ["gemini", "openai", "mock"],
+    ["gemini", "openai", "grok", "custom", "mock"],
     index=0,
-    help="Default: Google Gemini. Bisa beralih ke OpenAI atau simulasi Mock."
+    help="Pilih provider LLM: Gemini, OpenAI, Grok (xAI), Custom (OpenAI-compatible), atau simulasi Mock."
 )
+
+embedding_provider_input: str | None = None
+embedding_api_key_input: str | None = None
+base_url_input: str | None = None
 
 if provider == "gemini":
     model_name = st.sidebar.selectbox(
@@ -76,13 +87,205 @@ elif provider == "openai":
         value=os.getenv("OPENAI_API_KEY", ""),
         type="password"
     )
+elif provider == "grok":
+    model_name = st.sidebar.selectbox(
+        "Varian Model Grok (xAI):",
+        ["grok-3-mini", "grok-3", "grok-2"],
+        index=0,
+        help="grok-3-mini lebih hemat; grok-3 untuk respons terbaik."
+    )
+    api_key_input = st.sidebar.text_input(
+        "xAI API Key:",
+        value=os.getenv("XAI_API_KEY", "") or os.getenv("GROK_API_KEY", ""),
+        type="password",
+        help="Dapatkan di https://console.x.ai"
+    )
+    st.sidebar.caption("⚙️ Embedding Provider (Grok tidak punya model embedding sendiri):")
+    embedding_provider_input = st.sidebar.selectbox(
+        "Pilih Embedding Provider:",
+        ["gemini", "openai", "local"],
+        index=0,
+        help="'gemini' direkomendasikan (gratis & berkualitas). 'local' tidak butuh API key.",
+        key="grok_emb_provider"
+    )
+    if embedding_provider_input == "gemini":
+        embedding_api_key_input = st.sidebar.text_input(
+            "Gemini API Key (untuk embedding):",
+            value=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
+            type="password",
+            key="grok_emb_key"
+        )
+    elif embedding_provider_input == "openai":
+        embedding_api_key_input = st.sidebar.text_input(
+            "OpenAI API Key (untuk embedding):",
+            value=os.getenv("OPENAI_API_KEY", ""),
+            type="password",
+            key="grok_emb_key_oai"
+        )
+    else:
+        st.sidebar.info("Mode embedding lokal aktif (hash-based, tanpa API). Akurasi semantic retrieval terbatas.")
+elif provider == "custom":
+    presets = load_custom_presets()
+    preset_names = list(presets.keys())
+    preset_options = preset_names + ["➕ Buat Preset Baru..."]
+
+    if "custom_preset_choice" not in st.session_state or st.session_state.custom_preset_choice not in preset_options:
+        st.session_state.custom_preset_choice = preset_names[0] if preset_names else "➕ Buat Preset Baru..."
+
+    selected_preset = st.sidebar.selectbox(
+        "Pilih Preset Endpoint Tersimpan:",
+        preset_options,
+        index=preset_options.index(st.session_state.custom_preset_choice) if st.session_state.custom_preset_choice in preset_options else 0,
+        help="Preset disimpan permanen di data/custom_providers.json (tidak butuh konfigurasi .env)",
+        key="sb_preset_selector"
+    )
+    st.session_state.custom_preset_choice = selected_preset
+    is_new = (selected_preset == "➕ Buat Preset Baru...")
+
+    if not is_new:
+        curr_preset = presets.get(selected_preset, {})
+        def_url = curr_preset.get("base_url", "https://api.juanrouter.com/v1")
+        def_key = curr_preset.get("api_key", "")
+        def_model = curr_preset.get("model_name", "qwen3.8-max")
+        def_emb = curr_preset.get("embedding_provider", "gemini")
+    else:
+        def_url = "https://api.juanrouter.com/v1"
+        def_key = ""
+        def_model = "qwen3.8-max"
+        def_emb = "gemini"
+
+    if is_new:
+        preset_name_input = st.sidebar.text_input(
+            "Nama Preset Baru:",
+            value="Custom Gateway",
+            help="Nama pengenal untuk disimpan ke daftar preset Anda"
+        )
+    else:
+        preset_name_input = selected_preset
+
+    base_url_input = st.sidebar.text_input(
+        "API Endpoint (Base URL):",
+        value=def_url,
+        key=f"url_input_{selected_preset}",
+        help="Endpoint OpenAI-compatible (contoh: https://api.juanrouter.com/v1, https://api.deepseek.com/v1, http://localhost:11434/v1)"
+    )
+
+    api_key_input = st.sidebar.text_input(
+        "API Key:",
+        value=def_key,
+        type="password",
+        key=f"key_input_{selected_preset}",
+        help="API Key provider custom Anda"
+    )
+
+    # Tarik model dari server
+    col_fetch, col_test = st.sidebar.columns([1, 1])
+    with col_fetch:
+        if st.button("🔄 Tarik Model", width="stretch", help="Tarik daftar model aktif langsung dari endpoint"):
+            with st.spinner("Mengambil..."):
+                found_models = fetch_available_models(base_url_input, api_key_input)
+                if found_models:
+                    st.session_state[f"fetched_models_{selected_preset}"] = found_models
+                    st.sidebar.success(f"Ditemukan {len(found_models)} model!")
+                else:
+                    st.sidebar.warning("Gagal menarik daftar model otomatis (atau endpoint tidak mendukung /v1/models). Silakan ketik nama model secara manual.")
+
+    available_preset_models = st.session_state.get(f"fetched_models_{selected_preset}") or curr_preset.get("available_models", [])
+    if available_preset_models:
+        model_choice_list = list(dict.fromkeys(available_preset_models + ["Ketik manual..."]))
+        m_idx = model_choice_list.index(def_model) if def_model in model_choice_list else 0
+        chosen_m = st.sidebar.selectbox("Pilih Model:", model_choice_list, index=m_idx, key=f"sel_m_{selected_preset}")
+        if chosen_m == "Ketik manual...":
+            model_name = st.sidebar.text_input("Nama Model Manual:", value=def_model, key=f"manual_m_{selected_preset}")
+        else:
+            model_name = chosen_m
+    else:
+        model_name = st.sidebar.text_input(
+            "Nama Model:",
+            value=def_model,
+            key=f"model_input_{selected_preset}",
+            help="Contoh: qwen3.8-max, deepseek-v4-pro, llama3.2"
+        )
+
+    with col_test:
+        if st.button("🔌 Tes Koneksi", width="stretch", help="Kirim ping 1 token ke model"):
+            with st.spinner("Menguji..."):
+                ok, msg = test_custom_endpoint(base_url_input, api_key_input, model_name)
+                if ok:
+                    st.sidebar.success(msg)
+                else:
+                    st.sidebar.error(msg)
+
+    # Embedding Provider
+    st.sidebar.caption("⚙️ Embedding Provider (untuk Vector DB):")
+    emb_opts = ["gemini", "openai", "local"]
+    emb_idx = emb_opts.index(def_emb) if def_emb in emb_opts else 0
+    embedding_provider_input = st.sidebar.selectbox(
+        "Pilih Embedding Provider:",
+        emb_opts,
+        index=emb_idx,
+        key=f"emb_prov_{selected_preset}",
+        help="'gemini' direkomendasikan (gratis & berkualitas). 'local' tidak butuh API key tambahan."
+    )
+
+    if embedding_provider_input == "gemini":
+        embedding_api_key_input = st.sidebar.text_input(
+            "Gemini API Key (untuk embedding):",
+            value=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
+            type="password",
+            key=f"custom_emb_key_gemini_{selected_preset}"
+        )
+    elif embedding_provider_input == "openai":
+        embedding_api_key_input = st.sidebar.text_input(
+            "OpenAI API Key (untuk embedding):",
+            value=os.getenv("OPENAI_API_KEY", ""),
+            type="password",
+            key=f"custom_emb_key_oai_{selected_preset}"
+        )
+    else:
+        st.sidebar.info("Mode embedding lokal aktif (hash-based, tanpa API). Akurasi semantic retrieval terbatas.")
+
+    # Tombol Simpan & Hapus Preset
+    col_save, col_del = st.sidebar.columns([1, 1])
+    with col_save:
+        if st.button("💾 Simpan", width="stretch", help="Simpan preset ini ke file data/custom_providers.json"):
+            target_save_name = preset_name_input.strip()
+            if not target_save_name:
+                st.sidebar.error("Nama preset tidak boleh kosong!")
+            else:
+                save_custom_preset(target_save_name, {
+                    "base_url": base_url_input,
+                    "api_key": api_key_input,
+                    "model_name": model_name,
+                    "embedding_provider": embedding_provider_input,
+                    "available_models": available_preset_models
+                })
+                st.session_state.custom_preset_choice = target_save_name
+                st.sidebar.success(f"Preset '{target_save_name}' tersimpan permanen!")
+                st.rerun()
+
+    with col_del:
+        if not is_new:
+            if st.button("🗑️ Hapus", width="stretch", help="Hapus preset ini dari penyimpanan"):
+                delete_custom_preset(selected_preset)
+                remaining = list(load_custom_presets().keys())
+                st.session_state.custom_preset_choice = remaining[0] if remaining else "➕ Buat Preset Baru..."
+                st.sidebar.warning(f"Preset '{selected_preset}' dihapus.")
+                st.rerun()
 else:
     model_name = "mock-pedagogy-v1"
     api_key_input = "mock-key"
     st.sidebar.warning("Mode simulasi lokal aktif. Hasil respons bersifat representatif offline.")
 
 # Instantiate LLM Client
-llm_client = get_llm_client(provider=provider, model_name=model_name, api_key=api_key_input if api_key_input else None)
+llm_client = get_llm_client(
+    provider=provider,
+    model_name=model_name,
+    api_key=api_key_input if api_key_input else None,
+    base_url=base_url_input if base_url_input else None,
+    embedding_provider=embedding_provider_input,
+    embedding_api_key=embedding_api_key_input if embedding_api_key_input else None,
+)
 
 # Initialize Storage & Engines
 vector_store = ChromaVectorStore()
@@ -101,7 +304,7 @@ uploaded_files = st.sidebar.file_uploader(
 )
 
 if uploaded_files:
-    if st.sidebar.button("📥 Proses & Indeks PDF ke Vector DB", use_container_width=True):
+    if st.sidebar.button("📥 Proses & Indeks PDF ke Vector DB", width="stretch"):
         with st.sidebar.status("Memproses dokumen...", expanded=True) as status:
             target_dir = RAW_PDF_DIR / selected_subject
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -184,7 +387,7 @@ with tab1:
         height=100
     )
 
-    if st.button("✨ Hasilkan Konten dengan RAG", type="primary", use_container_width=True):
+    if st.button("✨ Hasilkan Konten dengan RAG", type="primary", width="stretch"):
         if not user_query.strip():
             st.warning("Silakan masukkan topik atau instruksi.")
         else:
@@ -251,7 +454,7 @@ with tab2:
     with col_btn:
         st.write("")
         st.write("")
-        run_eval_btn = st.button("⚡ Jalankan Eksperimen Evaluasi Lengkap", type="primary", use_container_width=True)
+        run_eval_btn = st.button("⚡ Jalankan Eksperimen Evaluasi Lengkap", type="primary", width="stretch")
 
     if run_eval_btn:
         target_sub = None if "Semua" in eval_scope else selected_subject
@@ -264,7 +467,7 @@ with tab2:
         res_df = st.session_state.eval_results
         st.success("Eksperimen selesai! Berikut matriks perbandingan performa:")
         
-        st.dataframe(res_df, use_container_width=True)
+        st.dataframe(res_df)
 
         # Graphical Visualization
         st.subheader("📈 Visualisasi Metrik Kunci:")
@@ -292,7 +495,7 @@ with tab3:
     
     col_act1, col_act2 = st.columns(2)
     with col_act1:
-        if st.button("🔄 Generate Dokumen Contoh Awal (Fase E)", use_container_width=True):
+        if st.button("🔄 Generate Dokumen Contoh Awal (Fase E)", width="stretch"):
             with st.spinner("Membuat PDF modul ajar Bahasa Inggris, Informatika, dan KKA..."):
                 from scripts.generate_sample_data import generate_bahasa_inggris_sample, generate_informatika_sample, generate_kka_sample
                 generate_bahasa_inggris_sample()
@@ -304,7 +507,7 @@ with tab3:
                 st.rerun()
 
     with col_act2:
-        if st.button(f"🗑️ Bersihkan Indeks Mapel '{selected_subject.upper()}'", use_container_width=True):
+        if st.button(f"🗑️ Bersihkan Indeks Mapel '{selected_subject.upper()}'", width="stretch"):
             vector_store.clear_subject(selected_subject)
             st.warning(f"Indeks untuk {selected_subject} telah dikosongkan.")
             st.rerun()
@@ -315,3 +518,24 @@ with tab3:
     st.write(f"Daftar File PDF tersimpan pada mapel **{selected_subject}** ({len(files)} file):")
     for f in files:
         st.text(f"• {f.name} ({round(f.stat().st_size / 1024, 1)} KB)")
+
+    st.divider()
+    st.subheader("⚙️ Preset Endpoint LLM Custom (Tersimpan Permanen)")
+    st.caption("Daftar konfigurasi endpoint OpenAI-compatible yang tersimpan di `data/custom_providers.json`. Dapat digunakan langsung tanpa menyentuh file `.env`.")
+
+    custom_presets_data = load_custom_presets()
+    if custom_presets_data:
+        rows = []
+        for pname, pval in custom_presets_data.items():
+            key_raw = pval.get("api_key", "")
+            masked_key = f"{key_raw[:8]}...{key_raw[-4:]}" if len(key_raw) > 12 else ("(kosong)" if not key_raw else "****")
+            rows.append({
+                "Nama Preset": pname,
+                "Base URL": pval.get("base_url", ""),
+                "Model Default": pval.get("model_name", ""),
+                "Embedding Provider": pval.get("embedding_provider", ""),
+                "API Key": masked_key
+            })
+        st.dataframe(pd.DataFrame(rows))
+    else:
+        st.info("Belum ada preset custom yang tersimpan.")

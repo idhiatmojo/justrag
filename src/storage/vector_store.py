@@ -37,13 +37,8 @@ class ChromaVectorStore:
             for c in chunks
         ]
 
-        # Generate embeddings in batches of 16 to respect API rate limits
-        batch_size = 16
-        all_embeddings = []
-        for i in range(0, len(documents), batch_size):
-            batch_texts = documents[i:i + batch_size]
-            batch_embs = embedder.embed_texts(batch_texts)
-            all_embeddings.extend(batch_embs)
+        # Generate embeddings — batching and rate-limit retry are handled inside embed_texts()
+        all_embeddings = embedder.embed_texts(documents)
 
         self.collection.upsert(
             ids=ids,

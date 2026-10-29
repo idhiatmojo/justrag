@@ -16,7 +16,7 @@ from src.config import ALLOWED_SUBJECTS
 def main():
     parser = argparse.ArgumentParser(description="Jalankan Metodologi Evaluasi Sistematis & Ablation Study RAG Mapel")
     parser.add_argument("--subject", type=str, default=None, help="Mapel khusus (bahasa_inggris, informatika, kka) atau None untuk semua")
-    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai", "mock"], help="Penyedia LLM")
+    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai", "grok", "custom", "mock"], help="Penyedia LLM")
     parser.add_argument("--model", type=str, default=None, help="Nama model LLM (e.g., gemini-2.0-flash, gpt-4o-mini)")
     args = parser.parse_args()
 

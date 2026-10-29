@@ -46,8 +46,13 @@ htmlcov/
 data/chroma_db/
 data/bm25_db/
 
+# Uploaded raw PDFs (preserve sample generator PDFs only)
+data/raw_pdf/*/*.pdf
+!data/raw_pdf/*/*_kelas_x.pdf
+
 # Streamlit runtime data
 .streamlit/secrets.toml
+data/custom_providers.json
 
 # macOS specific files
 .DS_Store
@@ -60,7 +65,9 @@ data/bm25_db/
 # Editor & IDE artifacts
 .idea/
 .vscode/
+pyrightconfig.json
 *.swp
 *.swo
 *~
+.agents/
 
