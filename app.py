@@ -5,6 +5,9 @@ from pathlib import Path
 
 from src.config import ALLOWED_SUBJECTS, RAW_PDF_DIR
 from src.llm_factory import get_llm_client
+import importlib
+import src.storage.vector_store
+importlib.reload(src.storage.vector_store)
 from src.storage.vector_store import ChromaVectorStore
 from src.storage.bm25_store import BM25SubjectStore
 from src.ingestion.pipeline import DynamicIngestionPipeline
@@ -327,7 +330,10 @@ if uploaded_files:
             status.update(label="Proses indeks selesai!", state="complete")
 
 # Stats per subject
-stats = vector_store.get_stats_by_subject(embedder=llm_client)
+try:
+    stats = vector_store.get_stats_by_subject(embedder=llm_client)
+except TypeError:
+    stats = vector_store.get_stats_by_subject()
 st.sidebar.caption(f"📊 Status Korpus Tersimpan:")
 for sk, sinfo in ALLOWED_SUBJECTS.items():
     st.sidebar.text(f"• {sk.upper()}: {stats.get(sk, 0)} chunks")

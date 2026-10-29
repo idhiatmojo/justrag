@@ -120,7 +120,7 @@ class ChromaVectorStore:
 
         return formatted_results
 
-    def get_stats_by_subject(self, embedder: Optional[BaseLLMClient] = None) -> Dict[str, int]:
+    def get_stats_by_subject(self, embedder: Optional[BaseLLMClient] = None, *args, **kwargs) -> Dict[str, int]:
         """Returns document counts per subject for the active embedder collection."""
         try:
             if embedder is not None:
