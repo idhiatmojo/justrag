@@ -140,6 +140,44 @@ class ChromaVectorStore:
         except Exception:
             return {}
 
+    def get_active_collection_info(self, embedder: Optional[BaseLLMClient] = None) -> Dict[str, Any]:
+        """Returns metadata about the active collection routed for this embedder."""
+        dim = 3072
+        if embedder is not None:
+            try:
+                sample = embedder.embed_texts(["probe"])
+                if sample:
+                    dim = len(sample[0])
+            except Exception:
+                dim = 384
+        col = self._get_collection(dim)
+        return {
+            "name": col.name,
+            "dimension": dim,
+            "count": col.count(),
+        }
+
+    def get_all_collections_summary(self) -> List[Dict[str, Any]]:
+        """Returns a list of all collections with names, total counts, and subject breakdowns."""
+        summary = []
+        for col in self.client.list_collections():
+            try:
+                cnt = col.count()
+                data = col.get(include=["metadatas"])
+                subjects = {}
+                if data and "metadatas" in data and data["metadatas"]:
+                    for m in data["metadatas"]:
+                        sub = m.get("subject", "unknown")
+                        subjects[sub] = subjects.get(sub, 0) + 1
+                summary.append({
+                    "name": col.name,
+                    "count": cnt,
+                    "subjects": subjects
+                })
+            except Exception:
+                pass
+        return summary
+
     def clear_subject(self, subject: str):
         """Removes all chunks belonging to a specific subject across all dimension collections."""
         sub_filter = {"subject": subject.lower().strip()}

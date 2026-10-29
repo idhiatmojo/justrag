@@ -23,7 +23,12 @@ class BaseLLMClient(ABC):
 class GeminiLLMClient(BaseLLMClient):
     """Google Gemini LLM & Embedding provider (uses google.genai SDK)."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-3.5-flash"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = "gemini-3.5-flash",
+        embedding_provider: str = "gemini",
+    ):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY tidak ditemukan. Mohon set di .env atau via input UI.")
@@ -34,6 +39,11 @@ class GeminiLLMClient(BaseLLMClient):
         self._types = genai_types
         self.model_name = model_name
         self.embedding_model = "gemini-embedding-001"
+        self.embedding_provider = (embedding_provider or "gemini").lower().strip()
+        if self.embedding_provider == "local":
+            self._local_embedder: Optional[NeuralLocalEmbeddingClient] = NeuralLocalEmbeddingClient()
+        else:
+            self._local_embedder = None
         
     def generate_text(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3) -> str:
         config = self._types.GenerateContentConfig(
@@ -48,15 +58,10 @@ class GeminiLLMClient(BaseLLMClient):
         return response.text if response and response.text else ""
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of texts using Gemini embedding API.
+        """Embed a list of texts using configured provider (native Gemini or FastEmbed local)."""
+        if self._local_embedder is not None:
+            return self._local_embedder.embed_texts(texts)
 
-        Sends texts in batches (up to EMBED_BATCH_SIZE per API call) so that
-        a single ingest run does NOT blow through the RPM quota by firing one
-        request per chunk.  When a 429 RESOURCE_EXHAUSTED error is returned
-        the method waits the server-suggested retry delay (extracted from the
-        error payload) and then retries the same batch — up to MAX_RETRIES
-        times before re-raising.
-        """
         EMBED_BATCH_SIZE = 100   # max texts per embed_content call
         MAX_RETRIES = 5
         DEFAULT_WAIT = 60        # fallback wait seconds when server gives no hint
@@ -119,7 +124,12 @@ class GeminiLLMClient(BaseLLMClient):
 class OpenAILLMClient(BaseLLMClient):
     """OpenAI LLM & Embedding provider."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gpt-4o-mini"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = "gpt-4o-mini",
+        embedding_provider: str = "openai",
+    ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY tidak ditemukan. Mohon set di .env atau via input UI.")
@@ -128,6 +138,11 @@ class OpenAILLMClient(BaseLLMClient):
         self.client = OpenAI(api_key=self.api_key)
         self.model_name = model_name
         self.embedding_model = "text-embedding-3-small"
+        self.embedding_provider = (embedding_provider or "openai").lower().strip()
+        if self.embedding_provider == "local":
+            self._local_embedder: Optional[NeuralLocalEmbeddingClient] = NeuralLocalEmbeddingClient()
+        else:
+            self._local_embedder = None
         
     def generate_text(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3) -> str:
         messages = []
@@ -143,6 +158,9 @@ class OpenAILLMClient(BaseLLMClient):
         return resp.choices[0].message.content or ""
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        if self._local_embedder is not None:
+            return self._local_embedder.embed_texts(texts)
+
         clean_texts = [t[:8000] if t else " " for t in texts]
         resp = self.client.embeddings.create(
             model=self.embedding_model,
@@ -491,16 +509,18 @@ def get_llm_client(
 
     if provider == "gemini":
         target_model = model_name or "gemini-3.5-flash"
+        emb_prov = embedding_provider or "gemini"
         try:
-            return GeminiLLMClient(api_key=api_key, model_name=target_model)
+            return GeminiLLMClient(api_key=api_key, model_name=target_model, embedding_provider=emb_prov)
         except Exception as e:
             print(f"[Warning] Gagal inisialisasi Gemini ({e}). Menggunakan Fallback Mock Client.")
             return MockLLMClient()
 
     elif provider == "openai":
         target_model = model_name or "gpt-4o-mini"
+        emb_prov = embedding_provider or "openai"
         try:
-            return OpenAILLMClient(api_key=api_key, model_name=target_model)
+            return OpenAILLMClient(api_key=api_key, model_name=target_model, embedding_provider=emb_prov)
         except Exception as e:
             print(f"[Warning] Gagal inisialisasi OpenAI ({e}). Menggunakan Fallback Mock Client.")
             return MockLLMClient()

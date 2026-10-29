@@ -58,12 +58,18 @@ st.sidebar.info(ALLOWED_SUBJECTS[selected_subject]["description"])
 
 # 2. LLM Provider & Model Selection
 st.sidebar.subheader("2. Pilihan Model LLM")
+providers_list = ["custom", "gemini", "openai", "grok", "mock"]
+saved_prov = st.query_params.get("provider", "custom")
+def_idx = providers_list.index(saved_prov) if saved_prov in providers_list else 0
+
 provider = st.sidebar.selectbox(
     "LLM Provider:",
-    ["gemini", "openai", "grok", "custom", "mock"],
-    index=0,
-    help="Pilih provider LLM: Gemini, OpenAI, Grok (xAI), Custom (OpenAI-compatible), atau simulasi Mock."
+    providers_list,
+    index=def_idx,
+    help="Pilih provider LLM: Custom (OpenAI-compatible / TamanData / JuanRouter), Gemini, OpenAI, Grok (xAI), atau simulasi Mock.",
+    key="sb_llm_provider"
 )
+st.query_params["provider"] = provider
 
 embedding_provider_input: str | None = None
 embedding_api_key_input: str | None = None
@@ -81,6 +87,16 @@ if provider == "gemini":
         type="password",
         help="Masukkan Gemini API Key Anda. Jika kosong, sistem otomatis beralih ke mode simulasi aman."
     )
+    st.sidebar.caption("⚙️ Embedding Provider (untuk Vector DB):")
+    embedding_provider_input = st.sidebar.selectbox(
+        "Pilih Embedding Provider:",
+        ["local", "gemini"],
+        index=0,
+        help="Pilihan: 'local' (FastEmbed Neural 384-dim, mengakses korpus lokal tanpa API key), atau 'gemini' (Google Embedding API 3072-dim).",
+        key="gemini_emb_provider"
+    )
+    if embedding_provider_input == "local":
+        st.sidebar.success("⚡ FastEmbed Neural Lokal aktif (384 dim). Mengakses korpus offline yang tersimpan!")
 elif provider == "openai":
     model_name = st.sidebar.selectbox(
         "Varian Model OpenAI:",
@@ -92,6 +108,16 @@ elif provider == "openai":
         value=os.getenv("OPENAI_API_KEY", ""),
         type="password"
     )
+    st.sidebar.caption("⚙️ Embedding Provider (untuk Vector DB):")
+    embedding_provider_input = st.sidebar.selectbox(
+        "Pilih Embedding Provider:",
+        ["local", "openai"],
+        index=0,
+        help="Pilihan: 'local' (FastEmbed Neural 384-dim, mengakses korpus lokal tanpa API key), atau 'openai' (text-embedding-3-small).",
+        key="openai_emb_provider"
+    )
+    if embedding_provider_input == "local":
+        st.sidebar.success("⚡ FastEmbed Neural Lokal aktif (384 dim). Mengakses korpus offline yang tersimpan!")
 elif provider == "grok":
     model_name = st.sidebar.selectbox(
         "Varian Model Grok (xAI):",
@@ -331,14 +357,34 @@ if uploaded_files:
                     st.error(f"❌ Gagal memproses `{uf.name}`: {e}")
             status.update(label="Proses indeks selesai!", state="complete")
 
-# Stats per subject
+# Stats per subject & active collection info
 try:
     stats = vector_store.get_stats_by_subject(embedder=llm_client)
 except TypeError:
     stats = vector_store.get_stats_by_subject()
-st.sidebar.caption(f"📊 Status Korpus Tersimpan:")
+
+active_col_info = vector_store.get_active_collection_info(embedder=llm_client)
+col_name = active_col_info["name"]
+col_dim = active_col_info["dimension"]
+col_label = "FastEmbed Local (384-dim)" if col_dim == 384 else ("Gemini Cloud (3072-dim)" if col_dim == 3072 else f"{col_dim}-dim")
+
+st.sidebar.caption(f"📊 Status Korpus Aktif ({col_label}):")
 for sk, sinfo in ALLOWED_SUBJECTS.items():
     st.sidebar.text(f"• {sk.upper()}: {stats.get(sk, 0)} chunks")
+
+# BM25 Lexical Stats
+bm25_stats = bm25_store.get_stats_by_subject()
+bm25_curr = bm25_stats.get(selected_subject, 0)
+st.sidebar.caption(f"🗂️ Indeks Leksikal BM25 ({selected_subject.upper()}): {bm25_curr} chunks")
+
+# Show other collections if they exist
+all_summaries = vector_store.get_all_collections_summary()
+other_cols = [s for s in all_summaries if s["name"] != col_name and s["count"] > 0]
+if other_cols:
+    with st.sidebar.expander("ℹ️ Koleksi Lain di ChromaDB", expanded=False):
+        for oc in other_cols:
+            st.caption(f"• **`{oc['name']}`**: {oc['count']} chunks")
+        st.caption("Ubah Embedding Provider di atas untuk mengaktifkan koleksi terkait.")
 
 # ----------------- MAIN UI TABS -----------------
 st.title("📚 Pipeline RAG Generatif Mapel Fase E (Kelas X)")
@@ -538,6 +584,29 @@ with tab3:
     st.write(f"Daftar File PDF tersimpan pada mapel **{selected_subject}** ({len(files)} file):")
     for f in files:
         st.text(f"• {f.name} ({round(f.stat().st_size / 1024, 1)} KB)")
+
+    st.divider()
+    st.subheader("📊 Status Penyimpanan Vektor (ChromaDB) & Leksikal (BM25)")
+    st.caption("Ringkasan seluruh koleksi chunk yang tersimpan permanen di disk `data/chroma_db` dan `data/bm25_db`.")
+
+    col_rows = []
+    for col_info in vector_store.get_all_collections_summary():
+        c_name = col_info["name"]
+        dim_label = "384-dim (FastEmbed Local)" if "384" in c_name else ("3072-dim (Gemini)" if c_name == "curriculum_rag_docs" else "Vector")
+        sub_str = ", ".join([f"{k.upper()}: {v}" for k, v in col_info.get("subjects", {}).items()])
+        col_rows.append({
+            "Nama Koleksi": c_name,
+            "Tipe / Dimensi": dim_label,
+            "Total Chunk": col_info["count"],
+            "Rincian Mapel": sub_str or "(kosong)"
+        })
+    if col_rows:
+        st.dataframe(pd.DataFrame(col_rows), use_container_width=True)
+
+    bm25_all = bm25_store.get_stats_by_subject()
+    if bm25_all:
+        bm25_str = " | ".join([f"{k.upper()}: {v} chunks" for k, v in bm25_all.items()])
+        st.info(f"📚 **Indeks Leksikal BM25 (Offline Terpadu):** {bm25_str}")
 
     st.divider()
     st.subheader("⚙️ Preset Endpoint LLM Custom (Tersimpan Permanen)")

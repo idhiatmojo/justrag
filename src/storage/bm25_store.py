@@ -96,3 +96,7 @@ class BM25SubjectStore:
         # Sort combined results by score and take top_k
         all_hits.sort(key=lambda x: x["score"], reverse=True)
         return all_hits[:top_k]
+
+    def get_stats_by_subject(self) -> Dict[str, int]:
+        """Returns chunk counts per subject stored in BM25 lexical index."""
+        return {sub: len(chunks) for sub, chunks in self.chunk_stores.items()}
