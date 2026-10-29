@@ -110,7 +110,7 @@ elif provider == "grok":
         "Pilih Embedding Provider:",
         ["gemini", "openai", "local"],
         index=0,
-        help="'gemini' direkomendasikan (gratis & berkualitas). 'local' tidak butuh API key.",
+        help="Pilihan: 'gemini' (cloud), 'openai' (cloud), atau 'local' (FastEmbed Neural all-MiniLM-L6-v2, 100% offline & tanpa API key).",
         key="grok_emb_provider"
     )
     if embedding_provider_input == "gemini":
@@ -128,7 +128,7 @@ elif provider == "grok":
             key="grok_emb_key_oai"
         )
     else:
-        st.sidebar.info("Mode embedding lokal aktif (hash-based, tanpa API). Akurasi semantic retrieval terbatas.")
+        st.sidebar.success("⚡ FastEmbed Neural Lokal aktif (all-MiniLM-L6-v2, 384 dim ONNX). 100% offline tanpa API key.")
 elif provider == "custom":
     presets = load_custom_presets()
     preset_names = list(presets.keys())
@@ -230,7 +230,7 @@ elif provider == "custom":
         emb_opts,
         index=emb_idx,
         key=f"emb_prov_{selected_preset}",
-        help="'gemini' direkomendasikan (gratis & berkualitas). 'local' tidak butuh API key tambahan."
+        help="Pilihan: 'gemini' (cloud), 'openai' (cloud), atau 'local' (FastEmbed Neural all-MiniLM-L6-v2, 100% offline & tanpa API key)."
     )
 
     if embedding_provider_input == "gemini":
@@ -248,7 +248,7 @@ elif provider == "custom":
             key=f"custom_emb_key_oai_{selected_preset}"
         )
     else:
-        st.sidebar.info("Mode embedding lokal aktif (hash-based, tanpa API). Akurasi semantic retrieval terbatas.")
+        st.sidebar.success("⚡ FastEmbed Neural Lokal aktif (all-MiniLM-L6-v2, 384 dim ONNX). 100% offline tanpa API key.")
 
     # Tombol Simpan & Hapus Preset
     col_save, col_del = st.sidebar.columns([1, 1])

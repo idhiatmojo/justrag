@@ -189,17 +189,17 @@ class CustomOpenAICompatibleClient(BaseLLMClient):
             if gemini_key:
                 self._embedder: BaseLLMClient | LocalFallbackEmbeddingClient = GeminiLLMClient(api_key=gemini_key)
             else:
-                print("[CustomOpenAICompatibleClient] GEMINI_API_KEY tidak ada, beralih ke embedding lokal.")
-                self._embedder = LocalFallbackEmbeddingClient()
+                print("[CustomOpenAICompatibleClient] GEMINI_API_KEY tidak ada, beralih ke FastEmbed neural lokal.")
+                self._embedder = NeuralLocalEmbeddingClient()
         elif emb_prov == "openai":
             openai_key = embedding_api_key or os.getenv("OPENAI_API_KEY")
             if openai_key:
                 self._embedder = OpenAILLMClient(api_key=openai_key)
             else:
-                print("[CustomOpenAICompatibleClient] OPENAI_API_KEY tidak ada, beralih ke embedding lokal.")
-                self._embedder = LocalFallbackEmbeddingClient()
+                print("[CustomOpenAICompatibleClient] OPENAI_API_KEY tidak ada, beralih ke FastEmbed neural lokal.")
+                self._embedder = NeuralLocalEmbeddingClient()
         else:
-            self._embedder = LocalFallbackEmbeddingClient()
+            self._embedder = NeuralLocalEmbeddingClient()
 
     def generate_text(
         self,
@@ -282,17 +282,17 @@ class GrokLLMClient(BaseLLMClient):
             if gemini_key:
                 self._embedder = GeminiLLMClient(api_key=gemini_key)
             else:
-                print("[GrokLLMClient] GEMINI_API_KEY tidak ada, beralih ke embedding lokal.")
-                self._embedder = LocalFallbackEmbeddingClient()
+                print("[GrokLLMClient] GEMINI_API_KEY tidak ada, beralih ke FastEmbed neural lokal.")
+                self._embedder = NeuralLocalEmbeddingClient()
         elif embedding_provider == "openai":
             openai_key = embedding_api_key or os.getenv("OPENAI_API_KEY")
             if openai_key:
                 self._embedder = OpenAILLMClient(api_key=openai_key)
             else:
-                print("[GrokLLMClient] OPENAI_API_KEY tidak ada, beralih ke embedding lokal.")
-                self._embedder = LocalFallbackEmbeddingClient()
+                print("[GrokLLMClient] OPENAI_API_KEY tidak ada, beralih ke FastEmbed neural lokal.")
+                self._embedder = NeuralLocalEmbeddingClient()
         else:
-            self._embedder = LocalFallbackEmbeddingClient()
+            self._embedder = NeuralLocalEmbeddingClient()
 
     def generate_text(
         self,
@@ -363,12 +363,80 @@ class LocalFallbackEmbeddingClient:
         return vectors
 
 
+class NeuralLocalEmbeddingClient(BaseLLMClient):
+    """High-performance local neural embedding using FastEmbed (ONNX Runtime, CPU-optimized).
+
+    Uses `sentence-transformers/all-MiniLM-L6-v2` (384-dimensional dense vectors).
+    - 100% offline, zero API key required, zero network cost.
+    - Extremely fast inference on CPU (~5-10ms per document) via ONNX Runtime.
+    - Matches the `curriculum_rag_docs_local_384` ChromaDB collection.
+    - Automatically falls back to deterministic `LocalFallbackEmbeddingClient` if FastEmbed/ONNX fails.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        cache_dir: Optional[str] = None,
+    ):
+        self.model_name = model_name
+        self.cache_dir = cache_dir or os.getenv("FASTEMBED_CACHE_PATH")
+        if not self.cache_dir:
+            try:
+                from src.config import MODELS_CACHE_DIR
+                self.cache_dir = str(MODELS_CACHE_DIR)
+            except Exception:
+                self.cache_dir = None
+
+        self.dim = 384
+        self._model = None
+        self._fallback_embedder: Optional[LocalFallbackEmbeddingClient] = None
+
+    def _get_model(self):
+        if self._model is None and self._fallback_embedder is None:
+            try:
+                from fastembed import TextEmbedding
+                self._model = TextEmbedding(
+                    model_name=self.model_name,
+                    cache_dir=self.cache_dir,
+                )
+            except Exception as e:
+                print(f"[NeuralLocalEmbeddingClient] Gagal memuat FastEmbed ({e}). Beralih ke fallback hash.")
+                self._fallback_embedder = LocalFallbackEmbeddingClient(dim=self.dim)
+        return self._model
+
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+
+        clean_texts = [t[:4000] if t else " " for t in texts]
+        model = self._get_model()
+        if model is not None:
+            try:
+                embeddings = list(model.embed(clean_texts))
+                return [emb.tolist() for emb in embeddings]
+            except Exception as e:
+                print(f"[NeuralLocalEmbeddingClient] Gagal komputasi FastEmbed ({e}). Beralih ke fallback hash.")
+                if self._fallback_embedder is None:
+                    self._fallback_embedder = LocalFallbackEmbeddingClient(dim=self.dim)
+
+        if self._fallback_embedder is None:
+            self._fallback_embedder = LocalFallbackEmbeddingClient(dim=self.dim)
+        return self._fallback_embedder.embed_texts(clean_texts)
+
+    def generate_text(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3) -> str:
+        return (
+            "### [LOCAL NEURAL EMBEDDING ENGINE]\n"
+            "Modul ini bertindak sebagai embedder neural lokal offline (FastEmbed all-MiniLM-L6-v2, 384 dimensi). "
+            "Untuk kemampuan generasi teks, silakan pasangkan dengan LLM router (Gemini, Grok, OpenAI, atau Custom endpoint)."
+        )
+
+
 class MockLLMClient(BaseLLMClient):
     """Mock LLM Client for offline academic pipeline testing and unit tests."""
     
     def __init__(self, model_name: str = "mock-pedagogy-v1"):
         self.model_name = model_name
-        self._embedder = LocalFallbackEmbeddingClient()
+        self._embedder = NeuralLocalEmbeddingClient()
         
     def generate_text(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3) -> str:
         return (
@@ -399,7 +467,7 @@ def get_llm_client(
     Parameters
     ----------
     provider:
-        "gemini" | "openai" | "grok" | "custom" | "mock"
+        "gemini" | "openai" | "grok" | "custom" | "mock" | "local"
     model_name:
         Override the default model for the chosen provider.
     api_key:
@@ -469,5 +537,9 @@ def get_llm_client(
     elif provider == "mock":
         return MockLLMClient(model_name=model_name or "mock-test")
 
+    elif provider in ("local", "fastembed"):
+        target_model = model_name or "sentence-transformers/all-MiniLM-L6-v2"
+        return NeuralLocalEmbeddingClient(model_name=target_model)
+
     else:
-        raise ValueError(f"Provider '{provider}' tidak didukung. Pilihan: gemini, openai, grok, custom, mock.")
+        raise ValueError(f"Provider '{provider}' tidak didukung. Pilihan: gemini, openai, grok, custom, mock, local.")

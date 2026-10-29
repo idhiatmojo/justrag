@@ -45,6 +45,7 @@ htmlcov/
 # Local Vector Database & Indexes (ChromaDB & BM25 binary storage)
 data/chroma_db/
 data/bm25_db/
+data/models_cache/
 
 # Uploaded raw PDFs (preserve sample generator PDFs only)
 data/raw_pdf/*/*.pdf
