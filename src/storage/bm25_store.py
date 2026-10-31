@@ -100,3 +100,33 @@ class BM25SubjectStore:
     def get_stats_by_subject(self) -> Dict[str, int]:
         """Returns chunk counts per subject stored in BM25 lexical index."""
         return {sub: len(chunks) for sub, chunks in self.chunk_stores.items()}
+
+    def clear_subject(self, subject: str):
+        """Removes all chunks and persisted BM25 index file for a specific subject."""
+        sub = subject.lower().strip()
+        self.indices.pop(sub, None)
+        self.chunk_stores.pop(sub, None)
+        pkl_path = self._get_path(sub)
+        if pkl_path.exists():
+            try:
+                pkl_path.unlink()
+            except Exception as e:
+                print(f"[Warning] Gagal menghapus file BM25 {pkl_path}: {e}")
+
+    def delete_source_file(self, subject: str, source_file: str):
+        """Removes chunks belonging to a specific PDF file and rebuilds the subject's BM25 index."""
+        sub = subject.lower().strip()
+        existing = self.chunk_stores.get(sub, [])
+        if not existing:
+            return
+        remaining = [c for c in existing if c.get("source_file") != source_file]
+        if not remaining:
+            self.clear_subject(sub)
+            return
+
+        tokenized_corpus = [self._tokenize(c["text"]) for c in remaining]
+        bm25 = BM25Okapi(tokenized_corpus)
+        self.indices[sub] = bm25
+        self.chunk_stores[sub] = remaining
+        with open(self._get_path(sub), "wb") as f:
+            pickle.dump({"bm25": bm25, "chunks": remaining}, f)

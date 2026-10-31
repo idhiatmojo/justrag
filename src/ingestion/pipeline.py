@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from src.config import RAW_PDF_DIR, ALLOWED_SUBJECTS
+from src.config import RAW_PDF_DIR
+from src.subject_manager import load_subjects
 from src.ingestion.pdf_parser import PDFParser
 from src.ingestion.chunker import ContextualChunker
 from src.storage.vector_store import ChromaVectorStore
@@ -21,14 +22,16 @@ class DynamicIngestionPipeline:
         pdf_path: str | Path,
         subject: str,
         embedder: BaseLLMClient,
-        grade_level: str = "Kelas X"
+        grade_level: Optional[str] = None
     ) -> Dict[str, Any]:
         """Ingests a single PDF file dynamically into vector and lexical indexes."""
         subject = subject.lower().strip()
-        if subject not in ALLOWED_SUBJECTS:
-            raise ValueError(f"Subject '{subject}' tidak terdaftar. Pilihan: {list(ALLOWED_SUBJECTS.keys())}")
+        registered_subjects = load_subjects()
+        if subject not in registered_subjects:
+            raise ValueError(f"Subject '{subject}' tidak terdaftar. Pilihan: {list(registered_subjects.keys())}")
 
-        parser = PDFParser(subject=subject, grade_level=grade_level)
+        resolved_grade = grade_level or registered_subjects[subject].get("grade_level", "Kelas X")
+        parser = PDFParser(subject=subject, grade_level=resolved_grade)
         pages = parser.parse_pdf(pdf_path)
         if not pages:
             return {"status": "empty", "pages": 0, "chunks": 0, "file": Path(pdf_path).name}
@@ -53,11 +56,13 @@ class DynamicIngestionPipeline:
     def ingest_all_in_folder(self, embedder: BaseLLMClient) -> List[Dict[str, Any]]:
         """Scans data/raw_pdf/ across all subjects and ingests new documents."""
         results = []
-        for sub_key in ALLOWED_SUBJECTS.keys():
+        registered_subjects = load_subjects()
+        for sub_key, sub_info in registered_subjects.items():
             sub_folder = RAW_PDF_DIR / sub_key
             if not sub_folder.exists():
                 continue
+            sub_grade = sub_info.get("grade_level", "Kelas X")
             for pdf_file in sub_folder.glob("*.pdf"):
-                res = self.ingest_single_pdf(pdf_file, subject=sub_key, embedder=embedder)
+                res = self.ingest_single_pdf(pdf_file, subject=sub_key, embedder=embedder, grade_level=sub_grade)
                 results.append(res)
         return results

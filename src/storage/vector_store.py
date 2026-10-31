@@ -186,3 +186,17 @@ class ChromaVectorStore:
                 col.delete(where=sub_filter)
             except Exception:
                 pass
+
+    def delete_source_file(self, subject: str, source_file: str):
+        """Removes all chunks from a specific PDF source file within a subject across all collections."""
+        where_filter = {
+            "$and": [
+                {"subject": subject.lower().strip()},
+                {"source_file": source_file},
+            ]
+        }
+        for col in self.client.list_collections():
+            try:
+                col.delete(where=where_filter)
+            except Exception:
+                pass

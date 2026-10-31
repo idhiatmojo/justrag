@@ -1,53 +1,83 @@
 import os
-import hmac
-import hashlib
 import streamlit as st
 from typing import Optional, Dict, Any
 
-# Environment-configurable credentials
+from src.subject_manager import load_subjects
+from src.user_manager import (
+    authenticate_user,
+    change_own_password,
+    load_users,
+    normalize_username,
+    sanitize_user_public,
+)
+
+# Environment-configurable authentication gate
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
-def _get_registered_users() -> Dict[str, Dict[str, str]]:
-    """Returns the dictionary of configured users and their roles/passwords."""
-    admin_user = os.getenv("APP_ADMIN_USER", "admin")
-    admin_pass = os.getenv("APP_ADMIN_PASSWORD", "admin123")
-    
-    guru_user = os.getenv("APP_GURU_USER", "guru")
-    guru_pass = os.getenv("APP_GURU_PASSWORD", "guru123")
+SESSION_AUTH_KEYS = [
+    "authenticated",
+    "username",
+    "user_name",
+    "user_role",
+    "user_badge",
+    "account_type",
+    "allowed_subjects",
+]
 
-    return {
-        admin_user.lower().strip(): {
-            "username": admin_user,
-            "name": "Administrator / Peneliti S2",
-            "role": "Peneliti (Full Access)",
-            "password": admin_pass,
-            "badge": "🛡️ Admin / Peneliti"
-        },
-        guru_user.lower().strip(): {
-            "username": guru_user,
-            "name": "Guru Pamong / Pendidik Fase E",
-            "role": "Pendidik (Modul & Asesmen)",
-            "password": guru_pass,
-            "badge": "👨‍🏫 Guru / Pendidik"
-        }
-    }
+
+def _clear_auth_session() -> None:
+    for key in SESSION_AUTH_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _populate_auth_session(user_info: Dict[str, Any]) -> None:
+    st.session_state["authenticated"] = True
+    st.session_state["username"] = user_info["username"]
+    st.session_state["user_name"] = user_info["name"]
+    st.session_state["user_role"] = user_info["role"]
+    st.session_state["user_badge"] = user_info["badge"]
+    st.session_state["account_type"] = user_info.get("account_type", "guru")
+    st.session_state["allowed_subjects"] = user_info.get("allowed_subjects", ["*"])
 
 
 def verify_credentials(username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Verifies username and password using secure constant-time comparison."""
-    if not username or not password:
-        return None
+    """Verifies username and password against persistent PBKDF2 user database."""
+    user_info, _ = authenticate_user(username, password)
+    return user_info
 
-    users = _get_registered_users()
-    uname = username.lower().strip()
-    if uname in users:
-        user_info = users[uname]
-        # Secure string comparison to prevent timing attacks
-        valid_password = user_info["password"]
-        if hmac.compare_digest(password.encode("utf-8"), valid_password.encode("utf-8")):
-            return user_info
 
-    return None
+def get_current_user() -> Dict[str, Any]:
+    """Returns the currently authenticated user profile (or synthetic admin if AUTH_ENABLED=false)."""
+    if not AUTH_ENABLED:
+        return {
+            "username": "admin_dev",
+            "name": "Mode Tanpa Autentikasi (Admin)",
+            "account_type": "admin",
+            "role": "Peneliti (Full Access)",
+            "badge": "🛡️ Admin / Dev",
+            "allowed_subjects": ["*"],
+            "is_active": True,
+        }
+
+    uname = normalize_username(st.session_state.get("username", ""))
+    users = load_users()
+    if uname and uname in users:
+        return sanitize_user_public(users[uname])
+
+    return {
+        "username": uname or "pengguna",
+        "name": st.session_state.get("user_name", "Pengguna"),
+        "account_type": st.session_state.get("account_type", "guru"),
+        "role": st.session_state.get("user_role", "Pendidik"),
+        "badge": st.session_state.get("user_badge", "👨‍🏫 Guru / Pendidik"),
+        "allowed_subjects": st.session_state.get("allowed_subjects", ["*"]),
+        "is_active": True,
+    }
+
+
+def is_current_user_admin() -> bool:
+    """Returns True if the active session belongs to an Administrator account."""
+    return get_current_user().get("account_type") == "admin"
 
 
 def render_login_page() -> None:
@@ -69,7 +99,7 @@ def render_login_page() -> None:
         with st.container(border=True):
             st.markdown("## 🔐 Masuk ke Sistem RAGbot")
             st.caption(
-                "Sistem RAG Generatif Pembelajaran Fase E (Kelas X) Kurikulum Merdeka — "
+                "Sistem RAG Generatif Pembelajaran Kurikulum Merdeka — "
                 "Penelitian Pascasarjana / S2 Pendidikan & Ilmu Komputer."
             )
             st.divider()
@@ -78,72 +108,87 @@ def render_login_page() -> None:
                 username = st.text_input(
                     "Nama Pengguna (Username):",
                     placeholder="Contoh: admin atau guru",
-                    autocomplete="username"
+                    autocomplete="username",
                 )
                 password = st.text_input(
                     "Kata Sandi (Password):",
                     type="password",
                     placeholder="Masukkan kata sandi Anda",
-                    autocomplete="current-password"
+                    autocomplete="current-password",
                 )
-                
+
                 submitted = st.form_submit_button(
                     "Masuk ke Sistem",
                     icon=":material/login:",
-                    width="stretch"
+                    width="stretch",
                 )
 
                 if submitted:
-                    user_info = verify_credentials(username, password)
+                    user_info, err_msg = authenticate_user(username, password)
                     if user_info:
-                        st.session_state["authenticated"] = True
-                        st.session_state["username"] = user_info["username"]
-                        st.session_state["user_name"] = user_info["name"]
-                        st.session_state["user_role"] = user_info["role"]
-                        st.session_state["user_badge"] = user_info["badge"]
+                        _populate_auth_session(user_info)
                         st.toast("Autentikasi berhasil! Selamat datang.", icon="✅")
                         st.rerun()
                     else:
-                        st.error(
-                            "Nama pengguna atau kata sandi yang Anda masukkan salah.",
-                            icon=":material/error:"
-                        )
+                        st.error(err_msg, icon=":material/error:")
 
             # Quick credentials hint for evaluation & thesis testing
             with st.expander("ℹ️ Akun Uji Coba Demo Penelitian", expanded=False):
                 st.markdown(
                     """
-                    Gunakan kredensial pengujian berikut untuk mengakses sistem:
-                    - **Akun Peneliti**: `admin` | Kata Sandi: `admin123`  
-                      *(Akses penuh konfigurasi model, indeksing dokumen, dan evaluasi ablation study)*
-                    - **Akun Guru**: `guru` | Kata Sandi: `guru123`  
-                      *(Akses praktis pembuatan modul ajar, bank soal HOTS, dan ringkasan materi)*
+                    Gunakan kredensial pengujian bawaan berikut (atau akun guru yang didaftarkan Admin):
+                    - **Akun Peneliti / Admin**: `admin` | Kata Sandi bawaan: `admin123`  
+                      *(Akses penuh: konfigurasi model, manajemen mapel & guru, indeksing dokumen, dan evaluasi ablation study)*
+                    - **Akun Guru**: `guru` | Kata Sandi bawaan: `guru123`  
+                      *(Akses pendidik: pembuatan modul ajar, bank soal HOTS, ringkasan materi, dan upload PDF mapel yang diampu)*
                     """
                 )
 
 
 def render_user_profile_sidebar() -> None:
-    """Renders logged-in user details and a logout button at the top of the sidebar."""
-    if not st.session_state.get("authenticated", False):
+    """Renders logged-in user details, subject scope, password change, and logout button in sidebar."""
+    if AUTH_ENABLED and not st.session_state.get("authenticated", False):
         return
 
-    user_name = st.session_state.get("user_name", "Pengguna")
-    user_badge = st.session_state.get("user_badge", "👤 Pengguna")
-    user_role = st.session_state.get("user_role", "Pendidik")
+    curr = get_current_user()
+    user_name = curr.get("name", "Pengguna")
+    user_badge = curr.get("badge", "👤 Pengguna")
+    user_role = curr.get("role", "Pendidik")
+    acc_type = curr.get("account_type", "guru")
+    allowed = curr.get("allowed_subjects", ["*"])
+
+    all_subjects = load_subjects()
+    if acc_type == "admin" or "*" in allowed:
+        scope_label = "Semua Mata Pelajaran"
+    else:
+        names = [all_subjects[s]["display_name"] for s in allowed if s in all_subjects]
+        scope_label = ", ".join(names) if names else "(Belum ada mapel ditugaskan)"
 
     with st.sidebar.container(border=True):
         st.markdown(f"**{user_badge}**")
         st.caption(f"{user_name} ({user_role})")
-        
-        if st.button("Keluar (Logout)", icon=":material/logout:", width="stretch"):
-            # Clear authentication session state
-            for key in ["authenticated", "username", "user_name", "user_role", "user_badge"]:
-                st.session_state.pop(key, None)
-            st.rerun()
+        st.caption(f"📚 **Akses:** {scope_label}")
+
+        if AUTH_ENABLED and curr.get("username"):
+            with st.expander("🔑 Ubah Kata Sandi", expanded=False):
+                with st.form("sidebar_change_pwd_form", clear_on_submit=True):
+                    old_pw = st.text_input("Kata Sandi Lama:", type="password")
+                    new_pw = st.text_input("Kata Sandi Baru:", type="password")
+                    submitted_pw = st.form_submit_button("Simpan Sandi", width="stretch")
+                    if submitted_pw:
+                        ok, msg = change_own_password(curr["username"], old_pw, new_pw)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+
+            if st.button("Keluar (Logout)", icon=":material/logout:", width="stretch"):
+                _clear_auth_session()
+                st.rerun()
 
 
 def require_authentication() -> bool:
-    """Gatekeeper function. Returns True if authenticated, else renders login page and returns False."""
+    """Gatekeeper function. Syncs active user record; renders login page if unauthenticated."""
     if not AUTH_ENABLED:
         return True
 
@@ -151,4 +196,15 @@ def require_authentication() -> bool:
         render_login_page()
         return False
 
+    # Live-sync user record on every rerun in case Admin updated permissions or deactivated account
+    uname = normalize_username(st.session_state.get("username", ""))
+    users = load_users()
+    user_rec = users.get(uname)
+    if not user_rec or not user_rec.get("is_active", True):
+        _clear_auth_session()
+        st.warning("Sesi Anda telah berakhir atau akun dinonaktifkan oleh Administrator.")
+        render_login_page()
+        return False
+
+    _populate_auth_session(sanitize_user_public(user_rec))
     return True

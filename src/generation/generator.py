@@ -7,7 +7,7 @@ from src.generation.prompts import (
     QA_CHAT_TEMPLATE
 )
 from src.llm_factory import BaseLLMClient
-from src.config import ALLOWED_SUBJECTS
+from src.subject_manager import load_subjects
 
 class PedagogicalGenerator:
     """Orchestrates generation of educational assets conditioned on retrieved context."""
@@ -48,7 +48,8 @@ class PedagogicalGenerator:
         """
         Executes generation using the chosen template and retrieved context.
         """
-        sub_info = ALLOWED_SUBJECTS.get(subject.lower().strip(), {
+        registered_subjects = load_subjects()
+        sub_info = registered_subjects.get(subject.lower().strip(), {
             "display_name": subject,
             "description": ""
         })

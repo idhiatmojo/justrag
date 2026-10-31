@@ -54,6 +54,8 @@ data/raw_pdf/*/*.pdf
 # Streamlit runtime data
 .streamlit/secrets.toml
 data/custom_providers.json
+data/subjects.json
+data/users.json
 
 # macOS specific files
 .DS_Store

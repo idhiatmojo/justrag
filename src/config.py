@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -7,27 +8,38 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Allowed Subjects for Kelas X
-ALLOWED_SUBJECTS = {
+# Default Subjects for Kelas X (used to seed data/subjects.json)
+DEFAULT_SUBJECTS = {
     "bahasa_inggris": {
         "display_name": "Bahasa Inggris (Kelas X)",
         "description": "Fase E SMA/SMK: Narrative, Descriptive, Recount, Report Text, Grammar, HOTS Reading",
-        "folder": "bahasa_inggris"
+        "folder": "bahasa_inggris",
+        "grade_level": "Kelas X",
+        "sample_query": "Buat modul ajar perbandingan Simple Past dan Present Perfect beserta asesmen kontekstual"
     },
     "informatika": {
         "display_name": "Informatika (Kelas X)",
         "description": "Fase E SMA/SMK: Berpikir Komputasional, Algoritma Pemrograman, Jaringan, Analisis Data",
-        "folder": "informatika"
+        "folder": "informatika",
+        "grade_level": "Kelas X",
+        "sample_query": "Buat 3 butir soal HOTS level C4-C5 tentang empat pilar berpikir komputasional dan topologi star"
     },
     "kka": {
         "display_name": "KKA - Koding & Kecerdasan Artifisial (Kelas X)",
         "description": "Fase E SMA/SMK: Logika Koding Python, Dasar AI/ML, Prompt Engineering, Etika AI",
-        "folder": "kka"
+        "folder": "kka",
+        "grade_level": "Kelas X",
+        "sample_query": "Rangkum konsep Supervised vs Unsupervised Learning serta etika bias algoritma untuk siswa SMK"
     }
 }
 
+# Allowed Subjects (dynamically synchronized with data/subjects.json)
+ALLOWED_SUBJECTS = {k: dict(v) for k, v in DEFAULT_SUBJECTS.items()}
+
 # Directories
 DATA_DIR = BASE_DIR / "data"
+SUBJECTS_FILE = DATA_DIR / "subjects.json"
+USERS_FILE = DATA_DIR / "users.json"
 RAW_PDF_DIR = DATA_DIR / "raw_pdf"
 CHROMA_PERSIST_DIR = DATA_DIR / "chroma_db"
 BM25_PERSIST_DIR = DATA_DIR / "bm25_db"
@@ -36,6 +48,16 @@ MODELS_CACHE_DIR = DATA_DIR / "models_cache"
 
 for d in [DATA_DIR, RAW_PDF_DIR, CHROMA_PERSIST_DIR, BM25_PERSIST_DIR, EVALUATION_DIR, MODELS_CACHE_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+if SUBJECTS_FILE.exists():
+    try:
+        with open(SUBJECTS_FILE, "r", encoding="utf-8") as _f:
+            _loaded_subjects = json.load(_f)
+            if isinstance(_loaded_subjects, dict) and _loaded_subjects:
+                ALLOWED_SUBJECTS.clear()
+                ALLOWED_SUBJECTS.update(_loaded_subjects)
+    except Exception:
+        pass
 
 for sub in ALLOWED_SUBJECTS.keys():
     (RAW_PDF_DIR / sub).mkdir(parents=True, exist_ok=True)
